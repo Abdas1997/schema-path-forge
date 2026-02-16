@@ -13,6 +13,8 @@ import {
   FolderOpen,
   Key,
   User,
+  Pencil,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,22 +37,24 @@ import {
   type ConnectorTable,
 } from "@/lib/mock-data";
 
-type View = "list" | "create" | "detail";
+type View = "list" | "create" | "detail" | "edit";
 
 export default function ConnectorsTab() {
   const [view, setView] = useState<View>("list");
   const [connectors, setConnectors] = useState<Connector[]>(MOCK_CONNECTORS);
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
 
-  // Create form
+  // Create/Edit form
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [credentials, setCredentials] = useState<Credential[]>([{ username: "", public_key: "" }]);
   const [scheduleType, setScheduleType] = useState<"cron" | "on_landing">("on_landing");
   const [cronExpr, setCronExpr] = useState("");
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [connectorTableNames, setConnectorTableNames] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [deployed, setDeployed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleViewDetail = (c: Connector) => {
     setSelectedConnector(c);
@@ -59,23 +63,97 @@ export default function ConnectorsTab() {
 
   const handleCreate = () => {
     setView("create");
+    resetForm();
+  };
+
+  const handleEdit = (c: Connector) => {
+    setSelectedConnector(c);
+    setName(c.name);
+    setDescription(c.description);
+    setCredentials([...c.credentials]);
+    setScheduleType(c.schedule_type);
+    setCronExpr(c.schedule_cron || "");
+    setSelectedTables(c.tables.map((t) => t.table_id));
+    const tableNameMap: Record<string, string> = {};
+    c.tables.forEach((t) => { tableNameMap[t.table_id] = t.connector_table_name; });
+    setConnectorTableNames(tableNameMap);
+    setSaved(false);
+    setDeployed(false);
+    setView("edit");
+  };
+
+  const resetForm = () => {
     setName("");
     setDescription("");
     setCredentials([{ username: "", public_key: "" }]);
     setScheduleType("on_landing");
     setCronExpr("");
     setSelectedTables([]);
+    setConnectorTableNames({});
     setSaved(false);
     setDeployed(false);
   };
 
+  const simulateLoading = (cb: () => void) => {
+    setLoading(true);
+    setTimeout(() => { cb(); setLoading(false); }, 800);
+  };
+
   const handleSave = () => {
-    setSaved(true);
-    setDeployed(false);
+    simulateLoading(() => {
+      const tables: ConnectorTable[] = selectedTables.map((tid) => {
+        const t = MOCK_TABLES.find((mt) => mt.id === tid);
+        const ctName = connectorTableNames[tid] || t?.name || tid;
+        return {
+          table_id: tid,
+          table_name: t?.name || tid,
+          connector_table_name: ctName,
+          s3_path: getS3Path(name, ctName),
+        };
+      });
+
+      if (view === "edit" && selectedConnector) {
+        const updated: Connector = {
+          ...selectedConnector,
+          description,
+          credentials: [...credentials],
+          schedule_type: scheduleType,
+          schedule_cron: scheduleType === "cron" ? cronExpr : undefined,
+          tables,
+          status: "saved",
+        };
+        setConnectors((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        setSelectedConnector(updated);
+      } else {
+        const newConn: Connector = {
+          id: `c-${Date.now()}`,
+          name,
+          description,
+          credentials: [...credentials],
+          schedule_type: scheduleType,
+          schedule_cron: scheduleType === "cron" ? cronExpr : undefined,
+          tables,
+          status: "saved",
+          created_at: new Date().toISOString(),
+        };
+        setConnectors((prev) => [...prev, newConn]);
+        setSelectedConnector(newConn);
+      }
+      setSaved(true);
+      setDeployed(false);
+    });
   };
 
   const handleDeploy = () => {
-    setDeployed(true);
+    simulateLoading(() => {
+      if (selectedConnector || view === "edit") {
+        const id = selectedConnector?.id;
+        setConnectors((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, status: "deployed" as const } : c))
+        );
+      }
+      setDeployed(true);
+    });
   };
 
   const addCredential = () => {
@@ -98,6 +176,10 @@ export default function ConnectorsTab() {
     );
   };
 
+  const updateConnectorTableName = (tableId: string, ctName: string) => {
+    setConnectorTableNames((prev) => ({ ...prev, [tableId]: ctName }));
+  };
+
   const getS3Path = (connName: string, tableName: string) =>
     `s3://fi-ingest-prod/${connName || "<connector-name>"}/${tableName}/`;
 
@@ -105,7 +187,10 @@ export default function ConnectorsTab() {
     navigator.clipboard.writeText(text);
   };
 
-  // List View
+  // Determine which tables are available to add (not yet attached in edit mode)
+  const availableTables = MOCK_TABLES;
+
+  // ===== LIST VIEW =====
   if (view === "list") {
     return (
       <div className="space-y-4 animate-fade-in">
@@ -167,7 +252,7 @@ export default function ConnectorsTab() {
     );
   }
 
-  // Detail View
+  // ===== DETAIL VIEW =====
   if (view === "detail" && selectedConnector) {
     const c = selectedConnector;
     return (
@@ -187,6 +272,11 @@ export default function ConnectorsTab() {
           >
             {c.status}
           </Badge>
+          <div className="ml-auto">
+            <Button size="sm" variant="outline" onClick={() => handleEdit(c)}>
+              <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit Connector
+            </Button>
+          </div>
         </div>
 
         <div className="rounded-lg border bg-card p-4 space-y-3">
@@ -260,14 +350,20 @@ export default function ConnectorsTab() {
     );
   }
 
-  // Create View
+  // ===== CREATE / EDIT VIEW =====
+  const isEdit = view === "edit";
+  const formTitle = isEdit ? `Edit Connector — ${selectedConnector?.name}` : "New Connector";
+
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => setView("list")} className="text-muted-foreground">
+        <Button variant="ghost" size="sm" onClick={() => setView(isEdit ? "detail" : "list")} className="text-muted-foreground">
           ← Back
         </Button>
-        <h3 className="text-sm font-semibold text-foreground">New Connector</h3>
+        <h3 className="text-sm font-semibold text-foreground">{formTitle}</h3>
+        {isEdit && (
+          <Badge variant="outline" className="bg-secondary text-muted-foreground">editing</Badge>
+        )}
       </div>
 
       {/* Basic info */}
@@ -276,7 +372,16 @@ export default function ConnectorsTab() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Connector Name *</Label>
-            <Input className="bg-secondary font-mono text-sm" placeholder="e.g. acme-ingest" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              className="bg-secondary font-mono text-sm"
+              placeholder="e.g. acme-ingest"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={isEdit}
+            />
+            {isEdit && (
+              <p className="text-xs text-muted-foreground mt-1">Name cannot be changed after creation.</p>
+            )}
           </div>
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Description *</Label>
@@ -312,7 +417,7 @@ export default function ConnectorsTab() {
               <Label className="text-xs text-muted-foreground mb-1 block">Public Key</Label>
               <Input className="bg-secondary text-sm font-mono" placeholder="ssh-rsa AAAA..." value={cred.public_key} onChange={(e) => updateCredential(i, "public_key", e.target.value)} />
             </div>
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeCredential(i)}>
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeCredential(i)} disabled={credentials.length <= 1}>
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -350,12 +455,13 @@ export default function ConnectorsTab() {
       {/* Tables */}
       <section className="rounded-lg border bg-card p-5 space-y-3">
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Attach Tables</h4>
-        {MOCK_TABLES.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tables available. Create tables in Tab 1 first.</p>
+        {availableTables.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No tables available. Create tables in the Tables tab first.</p>
         ) : (
           <div className="space-y-2">
-            {MOCK_TABLES.map((t) => {
+            {availableTables.map((t) => {
               const isSelected = selectedTables.includes(t.id);
+              const ctName = connectorTableNames[t.id] || t.name;
               return (
                 <div
                   key={t.id}
@@ -373,10 +479,23 @@ export default function ConnectorsTab() {
                       <Badge variant="outline" className="text-xs">{t.format}</Badge>
                     </div>
                   </div>
-                  {isSelected && name && (
-                    <div className="mt-2 flex items-center gap-2 bg-card rounded p-2 animate-fade-in">
-                      <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <code className="text-xs font-mono text-primary">{getS3Path(name, t.name)}</code>
+                  {isSelected && (
+                    <div className="mt-2 space-y-2 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Connector–Table Name</Label>
+                        <Input
+                          className="bg-card font-mono text-xs h-8 max-w-xs"
+                          value={ctName}
+                          onChange={(e) => updateConnectorTableName(t.id, e.target.value)}
+                          placeholder={t.name}
+                        />
+                      </div>
+                      {name && (
+                        <div className="flex items-center gap-2 bg-card rounded p-2">
+                          <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <code className="text-xs font-mono text-primary">{getS3Path(name, ctName)}</code>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -388,19 +507,30 @@ export default function ConnectorsTab() {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={handleSave} disabled={!name}>
-          {saved ? <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Saved</> : "Save Connector"}
+        <Button size="sm" onClick={handleSave} disabled={!name || loading}>
+          {loading && !saved ? (
+            <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Saving…</>
+          ) : saved ? (
+            <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Saved</>
+          ) : isEdit ? "Save Changes" : "Save Connector"}
         </Button>
-        <Button size="sm" variant="outline" onClick={handleDeploy} disabled={!saved}>
-          <Rocket className="h-3.5 w-3.5 mr-1.5" />
-          {deployed ? "Deployed ✓" : "Deploy"}
+        <Button size="sm" variant="outline" onClick={handleDeploy} disabled={!saved || loading}>
+          {loading && saved && !deployed ? (
+            <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Deploying…</>
+          ) : (
+            <><Rocket className="h-3.5 w-3.5 mr-1.5" />{deployed ? "Deployed ✓" : isEdit ? "Redeploy" : "Deploy"}</>
+          )}
         </Button>
       </div>
 
       {deployed && (
         <div className="rounded-md border border-success/40 bg-success/10 p-3 flex items-center gap-2 animate-fade-in">
           <CheckCircle2 className="h-4 w-4 text-success" />
-          <span className="text-sm text-success">Connector deployed and marked eligible for deployment.</span>
+          <span className="text-sm text-success">
+            {isEdit
+              ? "Connector updated and redeployed successfully."
+              : "Connector deployed and marked eligible for deployment."}
+          </span>
         </div>
       )}
     </div>
