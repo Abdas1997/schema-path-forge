@@ -60,11 +60,14 @@ export default function TablesTab() {
   const [schemaSaved, setSchemaSaved] = useState(false);
 
   const handleInferSchema = () => {
-    // Mock: use schema from selected table or generate new
-    const table = MOCK_TABLES.find((t) => t.id === selectedTable);
-    if (table) {
-      setSchema([...table.schema]);
+    // Mock: use schema from selected table or generate new for create mode
+    if (mode === "select") {
+      const table = MOCK_TABLES.find((t) => t.id === selectedTable);
+      if (table) {
+        setSchema([...table.schema]);
+      }
     } else {
+      // Create new table — infer from uploaded file
       setSchema([
         { name: "id", type: "VARCHAR(64)", nullable: false, order: 1 },
         { name: "name", type: "VARCHAR(256)", nullable: false, order: 2 },
@@ -184,12 +187,24 @@ export default function TablesTab() {
             </SelectContent>
           </Select>
         ) : (
-          <Input
-            className="max-w-md bg-secondary"
-            placeholder="e.g. customer_orders"
-            value={newTableName}
-            onChange={(e) => setNewTableName(e.target.value)}
-          />
+          <div className="space-y-3 max-w-md">
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Table Name *</Label>
+              <Input
+                className="bg-secondary font-mono text-sm"
+                placeholder="e.g. customer_orders"
+                value={newTableName}
+                onChange={(e) => setNewTableName(e.target.value)}
+              />
+            </div>
+            {newTableName && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 p-3 animate-fade-in">
+                <p className="text-xs text-muted-foreground">
+                  A new table <span className="font-mono text-primary font-medium">{newTableName}</span> will be created via <span className="font-mono">APPLY_SCHEMA</span> after you define and save the schema below.
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </section>
 
@@ -275,7 +290,7 @@ export default function TablesTab() {
           </div>
         </div>
         <div className="mt-4">
-          <Button size="sm" onClick={handleInferSchema} disabled={!uploadedFile}>
+          <Button size="sm" onClick={handleInferSchema} disabled={!uploadedFile || (mode === "select" && !selectedTable) || (mode === "create" && !newTableName)}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
             Infer Schema
           </Button>
