@@ -1,5 +1,10 @@
 // Mock data and types for the File Ingestion app
 
+export interface Tenant {
+  id: string;
+  name: string;
+}
+
 export interface SchemaColumn {
   name: string;
   type: string;
@@ -31,6 +36,8 @@ export interface ValidationResult {
 export interface TableDef {
   id: string;
   name: string;
+  database?: string;
+  schemaName?: string;
   schema: SchemaColumn[];
   format: string;
   created_at: string;
@@ -67,11 +74,18 @@ export interface SchemaConflict {
   metadata_columns: SchemaColumn[];
 }
 
+// Mock tenants (single = hide selector)
+export const MOCK_TENANTS: Tenant[] = [
+  { id: "tenant-1", name: "ACME_PROD" },
+];
+
 // Mock existing tables
 export const MOCK_TABLES: TableDef[] = [
   {
     id: "t-001",
     name: "customer_transactions",
+    database: "PSOPERATIONAL",
+    schemaName: "FILE_INGESTION",
     schema: [
       { name: "transaction_id", type: "VARCHAR(64)", nullable: false, order: 1 },
       { name: "customer_id", type: "VARCHAR(32)", nullable: false, order: 2 },
@@ -85,6 +99,8 @@ export const MOCK_TABLES: TableDef[] = [
   {
     id: "t-002",
     name: "product_catalog",
+    database: "PSOPERATIONAL",
+    schemaName: "FILE_INGESTION",
     schema: [
       { name: "product_id", type: "VARCHAR(32)", nullable: false, order: 1 },
       { name: "name", type: "VARCHAR(256)", nullable: false, order: 2 },
@@ -97,6 +113,8 @@ export const MOCK_TABLES: TableDef[] = [
   {
     id: "t-003",
     name: "user_events",
+    database: "PSOPERATIONAL",
+    schemaName: "FILE_INGESTION",
     schema: [
       { name: "event_id", type: "VARCHAR(64)", nullable: false, order: 1 },
       { name: "user_id", type: "VARCHAR(32)", nullable: false, order: 2 },
